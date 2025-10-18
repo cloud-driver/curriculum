@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+
+{% block title %}編輯課程{% endblock %}
+
+{% block content %}
+{% set days = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"] %}
+<h1 class="h2 mb-4">
+    編輯課程 ({{ days[day] }} - 第{{ start_slot }}節{% if start_slot != end_slot %}至第{{ end_slot }}節{% endif %})
+</h1>
+
+<form method="POST">
+    <div class="mb-3">
+        <label for="name" class="form-label">課程名稱 (若留空則為刪除)</label>
+        <input type="text" class="form-control" id="name" name="name" value="{{ course.name if course else '' }}">
+    </div>
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <label for="teacher" class="form-label">教師名稱</label>
+            <input type="text" class="form-control" id="teacher" name="teacher" value="{{ course.teacher if course else '' }}">
+        </div>
+        <div class="col-md-6 mb-3">
+            <label for="location" class="form-label">上課地點</label>
+            <input type="text" class="form-control" id="location" name="location" value="{{ course.location if course else '' }}">
+        </div>
+    </div>
+    <div class="mb-3">
+        <label for="items_to_bring" class="form-label">需攜帶物品 (用逗號分隔)</label>
+        <textarea class="form-control" id="items_to_bring" name="items_to_bring" rows="3">{{ course.items_to_bring if course else '' }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">儲存</button>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">取消</a>
+</form>
+{% endblock %}

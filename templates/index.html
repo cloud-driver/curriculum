@@ -1,0 +1,190 @@
+{% extends 'base.html' %}
+
+{% block title %}我的課表{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h2">我的課表</h1>
+    <div>
+        <a href="{{ url_for('edit_time_slots') }}" class="btn btn-info">設定每節課時間</a>
+        <a href="{{ url_for('export_excel') }}" class="btn btn-success">匯出 Excel</a>
+    </div>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-bordered text-center timetable" id="timetable">
+        <thead>
+            <tr>
+                <th style="width: 8%;">節次</th>
+                <th style="width: 10%;">時間</th>
+                {% for day_name, day_index in displayed_days %}
+                    <th>{{ day_name }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for slot in time_slots %}
+            <tr>
+                <td>第{{ slot.id }}節</td>
+                <td class="time-cell">{{ slot.start_time.strftime('%H:%M') }}<br>{{ slot.end_time.strftime('%H:%M') }}</td>
+                {% for day_name, day_index in displayed_days %}
+                    {% if (day_index, slot.id) not in cells_to_skip %}
+                        {% set course = schedule.get((day_index, slot.id)) %}
+                        <td class="course-cell"
+                            data-day="{{ day_index }}"
+                            data-slot="{{ slot.id }}"
+                            rowspan="{{ (course.end_slot_id - course.start_slot_id + 1) if course else 1 }}">
+                            {% if course %}
+                                <strong>{{ course.name }}</strong><br>
+                                <span class="text-muted">{{ course.teacher }}</span><br>
+                                <small>{{ course.location }}</small>
+                            {% else %}
+                                <span class="text-light-gray">+</span>
+                            {% endif %}
+                        </td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="modal fade" id="mergeModal" tabindex="-1" aria-labelledby="mergeModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="mergeModalLabel">編輯課程</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                您選取了 <strong id="selectionInfo"></strong>。要為這個時段新增或編輯課程嗎？
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <a href="#" id="editButton" class="btn btn-primary">確定</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<style>
+    /*
+    ============================================
+    ==          在這裡加入修改後的樣式            ==
+    ============================================
+    */
+    .timetable {
+        table-layout: fixed; /* 核心修正：固定表格佈局，欄寬由 a<theada> 決定 */
+        width: 100%;         /* 確保表格佔滿容器寬度 */
+    }
+    /* ============================================ */
+
+    .timetable th, .timetable td {
+        vertical-align: middle;
+        min-height: 80px;
+        user-select: none; /* 防止拖曳時選取到文字 */
+        word-wrap: break-word; /* 讓過長的文字自動換行 */
+    }
+    .course-cell {
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+    .course-cell:hover {
+        background-color: #f0f8ff;
+    }
+    .time-cell { font-size: 0.9em; line-height: 1.2; }
+    .text-light-gray { color: #ccc; font-size: 1.5em; }
+    .cell-selected {
+        background-color: #b3d7ff !important;
+        border-color: #007bff !important;
+    }
+</style>
+
+<script>
+// JavaScript 的部分完全不需要修改，所以省略
+document.addEventListener('DOMContentLoaded', function () {
+    const timetable = document.getElementById('timetable');
+    const mergeModal = new bootstrap.Modal(document.getElementById('mergeModal'));
+    const selectionInfo = document.getElementById('selectionInfo');
+    const editButton = document.getElementById('editButton');
+
+    let isSelecting = false;
+    let startCell = null;
+    let selectedCells = [];
+
+    timetable.addEventListener('mousedown', (e) => {
+        const cell = e.target.closest('.course-cell');
+        if (!cell) return;
+
+        isSelecting = true;
+        startCell = cell;
+        document.querySelectorAll('.cell-selected').forEach(c => c.classList.remove('cell-selected'));
+        selectedCells = [cell];
+        cell.classList.add('cell-selected');
+        e.preventDefault();
+    });
+
+    timetable.addEventListener('mouseover', (e) => {
+        if (!isSelecting) return;
+        const currentCell = e.target.closest('.course-cell');
+        if (!currentCell || currentCell.dataset.day !== startCell.dataset.day) return;
+
+        document.querySelectorAll('.cell-selected').forEach(c => c.classList.remove('cell-selected'));
+        selectedCells = [];
+
+        const startSlot = parseInt(startCell.dataset.slot);
+        const currentSlot = parseInt(currentCell.dataset.slot);
+        const minSlot = Math.min(startSlot, currentSlot);
+        const maxSlot = Math.max(startSlot, currentSlot);
+        const day = startCell.dataset.day;
+
+        for (let i = minSlot; i <= maxSlot; i++) {
+            const cellToSelect = document.querySelector(`.course-cell[data-day='${day}'][data-slot='${i}']`);
+            if (cellToSelect) {
+                cellToSelect.classList.add('cell-selected');
+                selectedCells.push(cellToSelect);
+            }
+        }
+    });
+
+    document.addEventListener('mouseup', (e) => {
+        if (!isSelecting) return;
+        isSelecting = false;
+
+        if (selectedCells.length === 0) return;
+
+        const day = selectedCells[0].dataset.day;
+        const slots = selectedCells.map(c => parseInt(c.dataset.slot));
+        const startSlot = Math.min(...slots);
+        const endSlot = Math.max(...slots);
+
+        // 如果只點擊一個已存在的課程，直接跳轉
+        if (selectedCells.length === 1 && selectedCells[0].rowSpan > 1) {
+            const existingCourseEndSlot = startSlot + selectedCells[0].rowSpan - 1;
+             window.location.href = `/edit_course?day=${day}&start_slot=${startSlot}&end_slot=${existingCourseEndSlot}`;
+             return;
+        }
+
+        const dayNames = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"];
+        let infoText = `${dayNames[day]} 的第 ${startSlot} 節`;
+        if (startSlot !== endSlot) {
+            infoText += ` 至第 ${endSlot} 節`;
+        }
+        selectionInfo.innerText = infoText;
+
+        editButton.href = `/edit_course?day=${day}&start_slot=${startSlot}&end_slot=${endSlot}`;
+        mergeModal.show();
+
+        // 清除選取樣式
+        mergeModal._element.addEventListener('hidden.bs.modal', () => {
+             document.querySelectorAll('.cell-selected').forEach(c => c.classList.remove('cell-selected'));
+        }, { once: true });
+    });
+});
+</script>
+{% endblock %}
