@@ -11,6 +11,40 @@
     </div>
 </div>
 
+<h2 class="h3 mb-3">今日課程總覽</h2>
+{% if today_courses %}
+<div class="row">
+    {% for course in today_courses %}
+    <div class="col-md-6 col-lg-4 mb-4">
+        <div class="card h-100">
+            <div class="card-body d-flex flex-column">
+                <h5 class="card-title">{{ course.name }}</h5>
+                <h6 class="card-subtitle mb-2 text-muted">
+                    <i class="bi bi-clock"></i> {{ course.start_slot.start_time.strftime('%H:%M') }} - {{ course.end_slot.end_time.strftime('%H:%M') }}
+                </h6>
+                <p class="card-text mb-1"><i class="bi bi-person"></i> <strong>教師：</strong>{{ course.teacher or '未指定' }}</p>
+                <p class="card-text"><i class="bi bi-geo-alt"></i> <strong>地點：</strong>{{ course.location or '未指定' }}</p>
+                {% if course.items_to_bring %}
+                <div class="mt-auto pt-2">
+                    <p class="card-text text-danger">
+                        <strong><i class="bi bi-exclamation-triangle-fill"></i> 需攜帶物品：</strong> {{ course.items_to_bring }}
+                    </p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-success" role="alert">
+    <h4 class="alert-heading">太棒了！</h4>
+    <p>今天沒有任何課程，您可以好好休息或安排自己的活動。</p>
+</div>
+{% endif %}
+
+<hr class="my-4">
+
 <div class="table-responsive">
     <table class="table table-bordered text-center timetable" id="timetable">
         <thead>
@@ -73,22 +107,17 @@
 {% block scripts %}
 {{ super() }}
 <style>
-    /*
-    ============================================
-    ==          在這裡加入修改後的樣式            ==
-    ============================================
-    */
     .timetable {
-        table-layout: fixed; /* 核心修正：固定表格佈局，欄寬由 a<theada> 決定 */
-        width: 100%;         /* 確保表格佔滿容器寬度 */
+        table-layout: fixed;
+        width: 100%;
+        min-width: 800px;
     }
-    /* ============================================ */
-
     .timetable th, .timetable td {
         vertical-align: middle;
         min-height: 80px;
-        user-select: none; /* 防止拖曳時選取到文字 */
-        word-wrap: break-word; /* 讓過長的文字自動換行 */
+        user-select: none;
+        -webkit-user-select: none;
+        word-wrap: break-word;
     }
     .course-cell {
         cursor: pointer;
@@ -106,7 +135,6 @@
 </style>
 
 <script>
-// JavaScript 的部分完全不需要修改，所以省略
 document.addEventListener('DOMContentLoaded', function () {
     const timetable = document.getElementById('timetable');
     const mergeModal = new bootstrap.Modal(document.getElementById('mergeModal'));
@@ -117,32 +145,81 @@ document.addEventListener('DOMContentLoaded', function () {
     let startCell = null;
     let selectedCells = [];
 
+    let longPressTimer = null;
+    const LONG_PRESS_DURATION = 400;
+
     timetable.addEventListener('mousedown', (e) => {
         const cell = e.target.closest('.course-cell');
         if (!cell) return;
+        startSelection(cell);
+        e.preventDefault();
+    });
 
+    timetable.addEventListener('mouseover', (e) => {
+        if (!isSelecting || longPressTimer) return;
+        const currentCell = e.target.closest('.course-cell');
+        updateSelection(currentCell);
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isSelecting && !longPressTimer) {
+            endSelection();
+        }
+    });
+
+    timetable.addEventListener('touchstart', (e) => {
+        const cell = e.target.closest('.course-cell');
+        if (!cell) return;
+        
+        longPressTimer = setTimeout(() => {
+            longPressTimer = null;
+            startSelection(cell);
+            if (navigator.vibrate) {
+                navigator.vibrate(50);
+            }
+        }, LONG_PRESS_DURATION);
+    }, { passive: true });
+
+    timetable.addEventListener('touchmove', (e) => {
+        if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }
+        if (!isSelecting) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        const element = document.elementFromPoint(touch.clientX, touch.clientY);
+        const currentCell = element ? element.closest('.course-cell') : null;
+        updateSelection(currentCell);
+    }, { passive: false });
+
+    document.addEventListener('touchend', () => {
+        if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }
+        if (isSelecting) {
+            endSelection();
+        }
+    });
+
+    function startSelection(cell) {
         isSelecting = true;
         startCell = cell;
         document.querySelectorAll('.cell-selected').forEach(c => c.classList.remove('cell-selected'));
         selectedCells = [cell];
         cell.classList.add('cell-selected');
-        e.preventDefault();
-    });
+    }
 
-    timetable.addEventListener('mouseover', (e) => {
-        if (!isSelecting) return;
-        const currentCell = e.target.closest('.course-cell');
-        if (!currentCell || currentCell.dataset.day !== startCell.dataset.day) return;
-
+    function updateSelection(currentCell) {
+        if (!currentCell || !startCell || currentCell.dataset.day !== startCell.dataset.day) return;
         document.querySelectorAll('.cell-selected').forEach(c => c.classList.remove('cell-selected'));
         selectedCells = [];
-
         const startSlot = parseInt(startCell.dataset.slot);
         const currentSlot = parseInt(currentCell.dataset.slot);
         const minSlot = Math.min(startSlot, currentSlot);
         const maxSlot = Math.max(startSlot, currentSlot);
         const day = startCell.dataset.day;
-
         for (let i = minSlot; i <= maxSlot; i++) {
             const cellToSelect = document.querySelector(`.course-cell[data-day='${day}'][data-slot='${i}']`);
             if (cellToSelect) {
@@ -150,41 +227,92 @@ document.addEventListener('DOMContentLoaded', function () {
                 selectedCells.push(cellToSelect);
             }
         }
-    });
+    }
 
-    document.addEventListener('mouseup', (e) => {
+    function endSelection() {
         if (!isSelecting) return;
-        isSelecting = false;
-
+        setTimeout(() => { isSelecting = false; }, 100);
         if (selectedCells.length === 0) return;
-
         const day = selectedCells[0].dataset.day;
         const slots = selectedCells.map(c => parseInt(c.dataset.slot));
         const startSlot = Math.min(...slots);
         const endSlot = Math.max(...slots);
-
-        // 如果只點擊一個已存在的課程，直接跳轉
         if (selectedCells.length === 1 && selectedCells[0].rowSpan > 1) {
             const existingCourseEndSlot = startSlot + selectedCells[0].rowSpan - 1;
              window.location.href = `/edit_course?day=${day}&start_slot=${startSlot}&end_slot=${existingCourseEndSlot}`;
              return;
         }
-
         const dayNames = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"];
         let infoText = `${dayNames[day]} 的第 ${startSlot} 節`;
         if (startSlot !== endSlot) {
             infoText += ` 至第 ${endSlot} 節`;
         }
         selectionInfo.innerText = infoText;
-
         editButton.href = `/edit_course?day=${day}&start_slot=${startSlot}&end_slot=${endSlot}`;
         mergeModal.show();
-
-        // 清除選取樣式
         mergeModal._element.addEventListener('hidden.bs.modal', () => {
              document.querySelectorAll('.cell-selected').forEach(c => c.classList.remove('cell-selected'));
         }, { once: true });
-    });
+    }
+});
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const courses = JSON.parse('{{ today_courses_json|safe }}');
+    const notificationMinutes = parseInt('{{ notification_minutes }}', 10);
+
+    if (isNaN(notificationMinutes) || notificationMinutes === 0 || courses.length === 0) {
+        return; // 如果設定為0、非數字或今天沒課，則不執行
+    }
+
+    function requestNotificationPermission() {
+        if (!("Notification" in window)) {
+            console.log("此瀏覽器不支援桌面通知");
+        } else if (Notification.permission === "granted") {
+            scheduleNotifications();
+        } else if (Notification.permission !== "denied") {
+            Notification.requestPermission().then(permission => {
+                if (permission === "granted") {
+                    scheduleNotifications();
+                }
+            });
+        }
+    }
+
+    function scheduleNotifications() {
+        const now = new Date();
+        
+        courses.forEach(course => {
+            const [hours, minutes] = course.start_time.split(':').map(Number);
+            const startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes);
+
+            const notificationTime = new Date(startTime.getTime() - notificationMinutes * 60000);
+
+            const delay = notificationTime.getTime() - now.getTime();
+            if (delay > 0) {
+                console.log(`已為課程 "${course.name}" 設定於 ${notificationTime.toLocaleTimeString()} 的通知`);
+                setTimeout(() => {
+                    showNotification(course);
+                }, delay);
+            }
+        });
+    }
+
+    function showNotification(course) {
+        const title = `課程提醒：${course.name}`;
+        let body = `${course.start_time} 在 ${course.location || '未指定地點'} 上課。`;
+        if (course.items_to_bring) {
+            body += `\n記得攜帶：${course.items_to_bring}`;
+        }
+
+        new Notification(title, {
+            body: body,
+            icon: '/static/bell.png' // 通知顯示的圖示
+        });
+    }
+
+    requestNotificationPermission();
 });
 </script>
 {% endblock %}

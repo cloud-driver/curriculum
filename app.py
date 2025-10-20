@@ -1,6 +1,7 @@
 import io
 import os
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, jsonify
+import json
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, time, timedelta
 import pandas as pd
@@ -72,8 +73,26 @@ def index():
 
     displayed_days = get_display_days()
 
+    # 取得通知設定
+    notification_minutes_setting = Setting.query.get('notification_minutes')
+    notification_minutes = notification_minutes_setting.value if notification_minutes_setting else 0
+
+
+    # 準備給 JavaScript 用的今日課程資料
+    today_courses_json = []
+    for course in today_courses:
+        today_courses_json.append({
+            'name': course.name,
+            'location': course.location,
+            'start_time': course.start_slot.start_time.strftime('%H:%M'),
+            'items_to_bring': course.items_to_bring
+        })
+
     return render_template('index.html', time_slots=time_slots, schedule=schedule, cells_to_skip=cells_to_skip, 
-                           today_courses=today_courses, displayed_days=displayed_days)
+                           today_courses=today_courses, displayed_days=displayed_days,
+                           # 傳遞資料給前端
+                           notification_minutes=int(notification_minutes),
+                           today_courses_json=json.dumps(today_courses_json))
     
 @app.route('/edit_course', methods=['GET', 'POST'])
 def edit_course():
@@ -111,7 +130,7 @@ def edit_course():
 
 @app.route('/delete_course/<int:course_id>')
 def delete_course(course_id):
-    course = Course.query.get_or_44(course_id)
+    course = Course.query.get_or_404(course_id)
     db.session.delete(course)
     db.session.commit()
     return redirect(url_for('index'))
@@ -124,20 +143,26 @@ def edit_time_slots():
             slot.start_time = datetime.strptime(request.form[f'start_{slot.id}'], '%H:%M').time()
             slot.end_time = datetime.strptime(request.form[f'end_{slot.id}'], '%H:%M').time()
         
-        setting_sat = Setting.query.get('show_saturday')
-        setting_sun = Setting.query.get('show_sunday')
-        setting_sat.value = '1' if 'show_saturday' in request.form else '0'
-        setting_sun.value = '1' if 'show_sunday' in request.form else '0'
+        Setting.query.get('show_saturday').value = '1' if 'show_saturday' in request.form else '0'
+        Setting.query.get('show_sunday').value = '1' if 'show_sunday' in request.form else '0'
         
+        # 儲存通知設定
+        setting_notification = Setting.query.get('notification_minutes')
+        setting_notification.value = request.form.get('notification_minutes', '10')
+
         db.session.commit()
         return redirect(url_for('index'))
     
     time_slots = TimeSlot.query.order_by(TimeSlot.id).all()
     show_saturday = Setting.query.get('show_saturday').value
     show_sunday = Setting.query.get('show_sunday').value
+    # 取得通知設定
+    notification_minutes = Setting.query.get('notification_minutes').value
 
     return render_template('time_slots.html', time_slots=time_slots, 
-                           show_saturday=show_saturday, show_sunday=show_sunday)
+                           show_saturday=show_saturday, show_sunday=show_sunday,
+                           # 傳遞設定給前端
+                           notification_minutes=notification_minutes)
 
 @app.route('/add_time_slot')
 def add_time_slot():
@@ -231,9 +256,15 @@ def init_db_command():
     
     db.session.add(Setting(key='show_saturday', value='1'))
     db.session.add(Setting(key='show_sunday', value='0'))
+    # 新增預設的通知設定
+    db.session.add(Setting(key='notification_minutes', value='10'))
     
     db.session.commit()
     print("Initialized the database with default time slots and display settings.")
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(os.path.join(app.root_path, 'static'), 'favicon.png', mimetype='image/vnd.microsoft.icon')
 
 if __name__ == '__main__':
     app.run(debug=True)
